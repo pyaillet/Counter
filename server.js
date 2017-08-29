@@ -1,54 +1,42 @@
 var five = require("johnny-five");
 var board = new five.Board();
 var request = require("request");
-var SPEED = 50;
 
 board.on("ready", function() {
+  var SPEED = 50;
+  var counterUrl = process.env.COUNTER_URL;
 
-  /**
-   * In order to use the Stepper class, your board must be flashed with
-   * either of the following:
-   *
-   * - AdvancedFirmata https://github.com/soundanalogous/AdvancedFirmata
-   * - ConfigurableFirmata https://github.com/firmata/arduino/releases/tag/v2.6.2
-   *
-   */
-  function CounterWheel(stepper) {
+  function CounterWheel(stepper, name) {
     this.pos = 0;
+    this.name = name;
     this.stepper = stepper;
-    this.steps = [
-      204,
-      205,
-      205,
-      205,
-      205,
-      204,
-      205,
-      205,
-      205,
-      205,
-    ];
+    this.steps = [204, 205, 205, 205, 205, 204, 205, 205, 205, 205];
   }
-  
+
   CounterWheel.prototype.number = function(n, cb) {
+    console.log(`${this.name}: ${this.pos} - ${n}`);
     var stepsToTake = 0;
+    if (this.pos == n) return;
     if (this.pos > n) {
       n += 10;
     }
-    for(var i=this.pos; i < n; ++i) {
-      stepsToTake += this.steps[i%10];
+    for (var i = this.pos; i < n; ++i) {
+      stepsToTake += this.steps[i % 10];
     }
-    this.stepper.speed(SPEED).ccw().step(stepsToTake, () => {
-      this.pos = n%10;
-      if (cb != undefined) {
-        cb();
-      }
-    });
-  }
-  
+    this.pos = n % 10;
+    this.stepper
+      .speed(SPEED)
+      .ccw()
+      .step(stepsToTake, () => {
+        if (cb != undefined) {
+          cb();
+        }
+      });
+  };
+
   CounterWheel.prototype.reset = function() {
     this.pos = 0;
-  }
+  };
 
   var st1 = new five.Stepper({
     type: five.Stepper.TYPE.FOUR_WIRE,
@@ -62,11 +50,30 @@ board.on("ready", function() {
     pins: [8, 9, 10, 11]
   });
 
-  st1.cw().speed(SPEED).step(2048, () => {});
-  st2.cw().speed(SPEED).step(2048, () => {});
+  var cw1 = new CounterWheel(st1, "cw1");
+  var cw2 = new CounterWheel(st2, "cw2");
 
-  cw1 = new CounterWheel(st1);
-  cw2 = new CounterWheel(st2);
+  function Counter(cws) {
+    this.cws = cws;
+  }
+
+  Counter.prototype.number = function(number) {
+    var i = 0;
+    while (i < this.cws.length) {
+      this.cws[i].number(number % 10);
+      number = ~~(number / 10);
+      i++;
+    }
+  };
+
+  var counter = new Counter([cw1, cw2]);
+
+  setInterval(function() {
+    request.get(counterUrl, (err, res, body) => {
+      console.log(body);
+      counter.number(body);
+    });
+  }, 5000);
 
   this.repl.inject({
     // Allow limited on/off control access to the
@@ -74,12 +81,7 @@ board.on("ready", function() {
     st1,
     st2,
     cw1,
-    cw2
+    cw2,
+    counter
   });
-
-
 });
-
-
-// cw1.reset();cw2.reset();
-// cw1.number(5);cw2.number(5);
